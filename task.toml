@@ -1,0 +1,91 @@
+artifacts = ["/app"]
+name = "batch-scheduler-optimizer"
+
+[metadata]
+author_name = "Jonathan"
+author_email = "jtolbert0175@gmail.com"
+difficulty_explanation = '''
+Restoring this scheduler is the work of a manufacturing-execution or production-scheduling engineer
+responding to a botched rollout: they have to reconstruct a governance-defined single-machine sequencing
+policy from a long, mostly-noise decision log rather than from a specification, and then actually solve the
+sequencing problem the policy defines. The hard part is twofold. First, the governing rules were settled
+incrementally and repeatedly overturned -- February drafts (an unweighted objective, no setup on the first
+job, setup applied after processing, a makespan tie-break, and "a greedy order is good enough") were partly
+reversed, and two March interim decisions on grace and weighting were revised again in May -- so every rule
+(the completion-time accumulation rule, the weighted-tardiness objective, the per-family grace and weight multiplier,
+the precedence handling, the exact optimisation target and the lexicographic tie-break) must be traced to
+its FINAL dated decision. Second, the objective the board fixed -- minimum total weighted tardiness on one
+machine with sequence-dependent family setup times and precedence constraints -- is NP-hard: because the
+setup cost depends on which job ran immediately before, completion times depend on the whole order, so no
+per-job priority rule (weighted-shortest-processing-time, earliest-due-date) is optimal, and the shipped
+greedy scheduler is measurably worse than the board's optimum on the crafted instances. The engineer must
+implement an exact optimiser -- a subset dynamic program over (remaining jobs, last family, current time)
+with the governance tie-break -- rather than delegate to a solver library, and must first contain a
+compromised host (revoking planted persistence and escalation and removing an exposed plaintext secret)
+before the restore is accepted. Holding the interacting rule set, the exact-optimisation requirement, the
+byte-level output contract and the containment end-states in mind at once is what separates a correct
+reconstruction from a plausible-looking greedy one.
+'''
+solution_explanation = '''
+The reference optimiser is in solution/scheduler_fixed.py and solution/solve.sh drives the whole task
+inside the environment container. solve.sh first contains the host to the end-states in
+/app/data/containment_checklist.json -- it strips the rogue automation line (comment
+batch-rollout-automation) from /app/host/authorized_keys, deletes the passwordless drop-in
+/app/host/sudoers.d/batch-rollout, and removes the world-readable plaintext secret
+/app/host/exposed/scheduler_signing.key so the secret string no longer appears under /app -- then copies
+scheduler_fixed.py over /app/workflow/scheduler.py and runs it. The optimiser reads the jobs+precedence
+instance, the fixed family setup matrix and the scheduling policy, resolves the per-family policy, and
+computes the exact minimum total weighted tardiness with a subset dynamic program over (remaining-job set,
+last family, current time): completion times accumulate setup-before-processing from the machine's initial
+family, tardiness is graced per family and weighted by the per-family multiplier, and precedence is enforced
+by only expanding eligible jobs. Among all optimal orders it reconstructs the lexicographically-smallest
+job-id sequence (the governance tie-break), then replays that order to emit schedule.json, objective.json
+and summary.json with the contracted checksums. Every governing value is traced to its final entry in
+/app/incident/scheduling_governance_log.md; report_spec.json supplies only the output contract.
+'''
+verification_explanation = '''
+The separate verifier (tests/Dockerfile builds an isolated image the agent cannot see) collects the agent's
+whole /app as the declared artifact and runs tests/test_outputs.py against it. It executes the agent's
+/app/workflow/scheduler.py as a subprocess under an unprivileged uid (65534 via setpriv, inputs staged into
+a candidate-writable work area) on both the shipped instance and a held-out alternate instance, and diffs
+schedule.json, objective.json and summary.json byte-for-byte against sealed fixtures generated from the
+reference. It independently re-derives the objective from the agent's emitted order with a simple simulator
+and asserts the order is precedence-feasible and attains the reference optimum, and it proves heuristics
+fail: a weighted-shortest-processing-time and an earliest-due-date order are both computed and shown to be
+strictly worse than the optimum on the shipped and alternate instances, and on a crafted micro-instance the
+WSPT order's objective is strictly larger than the agent's optimal objective. The exact optimum itself was
+validated offline against brute force over all feasible permutations on tiny instances. A static AST scan
+forbids importing solver/graph libraries (ortools, pulp, scipy, numpy, networkx, ...) and dynamic execution
+(eval/exec/compile). The frozen broken snapshot /app/workflow/.scheduler.original is asserted wrong by hash
+and by objective (its greedy order exceeds the optimum). Containment is graded by content/existence under
+/app. Confirmed locally in the real two-container flow: after solve.sh the verifier gives reward 1; a fresh
+environment with no solve.sh (the greedy scheduler still in place) gives 0.
+'''
+relevant_experience = '''
+Experience reconstructing a stateful sequencing/optimisation policy from an authoritative but noisy decision
+log rather than a clean spec -- tracing incrementally-revised rules to their final form and matching a
+byte-level output and checksum contract -- combined with implementing an EXACT combinatorial optimiser for
+an NP-hard single-machine weighted-tardiness problem with sequence-dependent setups and precedence (a subset
+dynamic program), rather than delegating to a solver library or shipping a greedy heuristic, plus basic host
+incident containment (revoking planted persistence/escalation and removing exposed secrets).
+'''
+category = "Software"
+subcategory = "Algorithms"
+tags = ["scheduling", "combinatorial-optimization", "np-hard", "incident-response", "containment"]
+expert_time_estimate_hours = 4
+difficulty = "advanced"
+languages = ["python"]
+
+[environment]
+build_timeout_sec = 900
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+network_mode = "no-network"
+
+[agent]
+timeout_sec = 3600
+
+[verifier]
+timeout_sec = 1800
+environment_mode = "separate"

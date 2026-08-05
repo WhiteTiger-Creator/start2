@@ -1,0 +1,111 @@
+{
+  "jobs": [
+    {
+      "id": "k00",
+      "family": "weld",
+      "processing_time": 8,
+      "due_date": 26,
+      "weight": 4
+    },
+    {
+      "id": "k01",
+      "family": "mill",
+      "processing_time": 12,
+      "due_date": 23,
+      "weight": 1
+    },
+    {
+      "id": "k02",
+      "family": "press",
+      "processing_time": 10,
+      "due_date": 35,
+      "weight": 3
+    },
+    {
+      "id": "k03",
+      "family": "mill",
+      "processing_time": 3,
+      "due_date": 38,
+      "weight": 4
+    },
+    {
+      "id": "k04",
+      "family": "press",
+      "processing_time": 12,
+      "due_date": 42,
+      "weight": 2
+    },
+    {
+      "id": "k05",
+      "family": "mill",
+      "processing_time": 7,
+      "due_date": 48,
+      "weight": 3
+    },
+    {
+      "id": "k06",
+      "family": "weld",
+      "processing_time": 8,
+      "due_date": 20,
+      "weight": 4
+    },
+    {
+      "id": "k07",
+      "family": "forge",
+      "processing_time": 9,
+      "due_date": 24,
+      "weight": 5
+    },
+    {
+      "id": "k08",
+      "family": "press",
+      "processing_time": 12,
+      "due_date": 38,
+      "weight": 1
+    },
+    {
+      "id": "k09",
+      "family": "mill",
+      "processing_time": 10,
+      "due_date": 26,
+      "weight": 5
+    },
+    {
+      "id": "k10",
+      "family": "press",
+      "processing_time": 5,
+      "due_date": 15,
+      "weight": 4
+    }
+  ],
+  "precedence": [
+    [
+      "k00",
+      "k06"
+    ],
+    [
+      "k00",
+      "k08"
+    ],
+    [
+      "k02",
+      "k05"
+    ],
+    [
+      "k02",
+      "k09"
+    ],
+    [
+      "k03",
+      "k04"
+    ],
+    [
+      "k05",
+      "k06"
+    ],
+    [
+      "k07",
+      "k09"
+    ]
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "title": "Batch Scheduler Optimizer Output Contract",
+  "version": "2.0",
+  "task_scope": "single-machine batch scheduling with sequence-dependent family setups and precedence",
+  "operational_purpose": "assign an order to the shipped jobs on one machine that minimises total weighted tardiness, then emit the schedule, the objective breakdown and a summary",
+  "contract_note": "This document is the OUTPUT CONTRACT ONLY: file paths, JSON schemas, required-field lists, field types/coercions, digest payload definitions and checksum serialization with worked test vectors. It does NOT define the objective, how completion times or tardiness are computed, how setups and precedence are handled, the optimisation target, the tie-break, or any weight/grace value. Those are the scheduling governance board's decisions and are reconstructed from /app/incident/scheduling_governance_log.md. Where a draft or interim entry conflicts with a later decision, the later decision governs.",
+  "workflow_repair": {
+    "path": "/app/workflow/scheduler.py",
+    "cli_usage": "python3 /app/workflow/scheduler.py --input PATH --output-dir PATH",
+    "defaults": {
+      "input": "/app/data/jobs.json",
+      "output_dir": "/app/output",
+      "setup_matrix": "/app/data/setup_matrix.json",
+      "scheduling_policy": "/app/data/scheduling_policy.json"
+    },
+    "generalization_contract": "Graded on behaviour, not source text. The emitted order must be precedence-feasible and must attain the governance objective's proven minimum on the shipped instance and on an alternate --input instance, and be identical on reruns. Hardcoded, stubbed or fixture-copied outputs fail. The objective (weighted tardiness with sequence-dependent setups and precedence) is NP-hard: a greedy priority rule (WSPT, EDD) is measurably suboptimal on the shipped instances, and no third-party solver library may be used. Delegating to an optimisation/solver or graph library is prohibited and rejected by a static check; implement the exact optimisation yourself.",
+    "prohibited_imports": ["ortools", "pulp", "scipy", "numpy", "networkx", "cvxpy", "gurobipy", "mip"],
+    "prohibited_dynamic_execution": ["eval", "exec", "compile"]
+  },
+  "input_source": {
+    "path": "/app/data/jobs.json",
+    "shape": "{\"jobs\": [{\"id\": str, \"family\": str, \"processing_time\": int, \"due_date\": int, \"weight\": int}, ...], \"precedence\": [[before_id, after_id], ...]}",
+    "fixed_paths_note": "--input selects the jobs+precedence instance only. The setup matrix and scheduling policy are always read from their fixed absolute paths and are never relocated by --input.",
+    "coercion": "int(str(x).strip()); on failure int(float(...)); on failure 0. family and id via str(...).strip().lower() (empty family -> 'unknown')."
+  },
+  "setup_source": {
+    "path": "/app/data/setup_matrix.json",
+    "shape": "{\"initial_family\": str, \"families\": [str, ...], \"setup\": {from_family: {to_family: int, ...}, ...}}",
+    "fixed_path": "Absolute and fixed.",
+    "_note": "How the initial family, the setup entries and precedence enter the completion-time and objective computation is governed by the log, not by this contract."
+  },
+  "policy_source": {
+    "path": "/app/data/scheduling_policy.json",
+    "shape": "{\"default\": {field: int, ...}, \"family_overrides\": {family: {field: int, ...}, ...}}",
+    "fixed_path": "Absolute and fixed. --input never relocates it.",
+    "_note": "Shape only. The approved baseline, the resolution order and the policy_checksum serialization are governed by the log (policy stages)."
+  },
+  "output_files": {
+    "schedule_json": "schedule.json",
+    "objective_json": "objective.json",
+    "summary_json": "summary.json",
+    "exactly": "A run writes exactly these three files into --output-dir and nothing else."
+  },
+  "field_types": {
+    "_note": "Container types and coercions the verifier matches exactly. Format facts only; which order a job receives and which value each field takes is governed by the log.",
+    "family": {"type": "string", "note": "normalized lowercase family name; must be a key of the setup matrix."},
+    "sequence": {"type": "array", "items": "string", "note": "A JSON array of job-id strings: every input job exactly once, in machine-run order."},
+    "weighted_tardiness_by_family": {"type": "object", "keys": "families present among the jobs, ascending", "note": "0 for a present family whose jobs are all on time."}
+  },
+  "digest_payloads": {
+    "placement_digest": "first 12 lowercase hex chars of sha1('{position}|{job_id}|{family}|{setup_from_prev}|{start_time}|{completion_time}|{tardiness}|{weighted_tardiness}')"
+  },
+  "schedule_json": {
+    "top_level_keys": ["sequence", "initial_family", "placements"],
+    "placements_order": "one row per job in machine-run (sequence) order",
+    "required_fields": [
+      "position", "job_id", "family", "processing_time", "due_date", "weight",
+      "effective_weight", "tardiness_grace", "setup_from_prev", "start_time",
+      "completion_time", "tardiness", "weighted_tardiness", "placement_digest"
+    ],
+    "field_policy": "Each placement row carries EXACTLY these keys — no extras, no omissions."
+  },
+  "objective_json": {
+    "schema_version": "sched-wt-v1",
+    "required_fields": [
+      "schema_version", "job_count", "sequence", "total_weighted_tardiness",
+      "total_tardiness", "tardy_job_count", "max_tardiness", "makespan",
+      "total_setup_time", "total_completion_time"
+    ],
+    "objective_note": "total_weighted_tardiness is the graded objective value; the sequence that achieves it must be the governance optimum. The formula that defines it is in the governance log, not here."
+  },
+  "summary_json": {
+    "schema_version": "sched-wt-v1",
+    "schema_version_note": "Emit summary.json schema_version exactly as this value ('sched-wt-v1'), NOT the report_spec top-level 'version' (2.0).",
+    "required_fields": [
+      "schema_version", "job_count", "precedence_edge_count", "family_count",
+      "distinct_family_transitions", "initial_family", "total_weighted_tardiness",
+      "total_tardiness", "tardy_job_count", "max_tardiness", "makespan",
+      "total_setup_time", "total_completion_time", "weighted_tardiness_by_family",
+      "jobs_checksum", "setup_matrix_checksum", "precedence_checksum",
+      "policy_checksum", "schedule_checksum", "placement_digest_checksum"
+    ],
+    "checksum_serialization_contract": {
+      "text_encoding": "UTF-8",
+      "field_delimiter": "|",
+      "row_delimiter": "one LF character (\\n)",
+      "trailing_delimiter": "none",
+      "empty_input": "hash the empty byte string",
+      "jobs_rows": "one 'id|family|processing_time|due_date|weight' row per job, sorted by id ascending",
+      "setup_rows": "one 'from_family|to_family|setup' row per matrix cell, sorted by (from ascending, to ascending)",
+      "precedence_rows": "one 'before|after' row per edge, sorted ascending; empty string when there are no edges",
+      "sha256_step": "lowercase hashlib.sha256(payload.encode('utf-8')).hexdigest()"
+    },
+    "checksum_test_vectors": {
+      "jobs_payload": "a01|forge|5|20|3\na02|weld|4|15|2",
+      "jobs_sha256": "31609197f353a1ac87aa4243da909ec310273f4a5c018a889e9efaae90eadc48",
+      "setup_payload": "forge|mill|6\nmill|press|4",
+      "setup_sha256": "a4e1203b5410018a6758c7f234f24a1911f6ba8e3106633aeb62e6920d5ba213",
+      "policy_payload": "default|1|0\npress|2|0",
+      "policy_sha256": "8441d261ebeef2b249fd22774ad24d144a4f65279fce6effcd71e41f2f410fd9"
+    },
+    "jobs_checksum": "SHA-256 over jobs_rows",
+    "setup_matrix_checksum": "SHA-256 over setup_rows",
+    "precedence_checksum": "SHA-256 over precedence_rows",
+    "policy_checksum": "SHA-256 hex digest over the resolved scheduling policy; serialization is defined in the governance log (policy resolution stage).",
+    "schedule_checksum": "sha256('|'.join(sequence job ids in machine-run order)) lowercase 64 hex",
+    "placement_digest_checksum": "sha256('|'.join(placement_digest values in machine-run order)) lowercase 64 hex"
+  },
+  "governing_entry_index": {
+    "_note": "Navigation aid only. Records WHICH entries carry the governing rule for each stage; it restates no formula, value, weight, grace or tie-break. Read the named entries in /app/incident/scheduling_governance_log.md. Entries not listed here are superseded or carry no scheduler semantics.",
+    "stages": {
+      "objective_model": ["#SCH-5101"],
+      "tardiness_weighting": ["#SCH-5102"],
+      "precedence": ["#SCH-5108"],
+      "optimization_target": ["#SCH-5120"],
+      "tie_break": ["#SCH-5145"],
+      "setup_canonicalization": ["#SCH-5140"],
+      "summary_aggregation": ["#SCH-5148"],
+      "policy_baseline": ["#SCH-5150"],
+      "policy_resolution": ["#SCH-5152"]
+    },
+    "reversal_warning": "Several stages had their DEFAULT or DIRECTION reversed by a later entry (the objective's weighting, whether the first job incurs setup, the order setup vs processing is applied, and the tie-break all deviate from an intuitive first guess by governance decision). Check each stage's latest dated entry.",
+    "optimization_warning": "The optimisation target is the PROVEN minimum, not a greedy-heuristic order. A priority-rule schedule (WSPT/EDD) is feasible but strictly suboptimal on the shipped instances and is rejected."
+  }
+}

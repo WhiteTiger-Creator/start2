@@ -1,0 +1,17 @@
+{
+  "default": {
+    "weight_multiplier": 1
+  },
+  "family_overrides": {
+    "press": {
+      "weight_multiplier": 2
+    },
+    "weld": {
+      "tardiness_grace": 4
+    },
+    "mill": {
+      "weight_multiplier": 1,
+      "tardiness_grace": 2
+    }
+  }
+}
