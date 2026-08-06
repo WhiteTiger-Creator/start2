@@ -2,113 +2,169 @@
   "jobs": [
     {
       "id": "j00",
-      "family": "mill",
-      "processing_time": 12,
-      "due_date": 59,
-      "weight": 1
+      "family": "grind",
+      "processing_time": 13,
+      "due_date": 60,
+      "weight": 5
     },
     {
       "id": "j01",
-      "family": "press",
-      "processing_time": 4,
-      "due_date": 39,
-      "weight": 4
+      "family": "mill",
+      "processing_time": 5,
+      "due_date": 63,
+      "weight": 5
     },
     {
       "id": "j02",
       "family": "weld",
-      "processing_time": 9,
-      "due_date": 58,
-      "weight": 2
+      "processing_time": 13,
+      "due_date": 47,
+      "weight": 5
     },
     {
       "id": "j03",
-      "family": "forge",
-      "processing_time": 10,
-      "due_date": 9,
-      "weight": 4
+      "family": "grind",
+      "processing_time": 9,
+      "due_date": 57,
+      "weight": 3
     },
     {
       "id": "j04",
-      "family": "weld",
-      "processing_time": 12,
-      "due_date": 56,
-      "weight": 1
+      "family": "press",
+      "processing_time": 9,
+      "due_date": 48,
+      "weight": 5
     },
     {
       "id": "j05",
-      "family": "weld",
-      "processing_time": 7,
-      "due_date": 54,
-      "weight": 2
+      "family": "press",
+      "processing_time": 3,
+      "due_date": 66,
+      "weight": 5
     },
     {
       "id": "j06",
-      "family": "forge",
-      "processing_time": 8,
-      "due_date": 9,
-      "weight": 1
+      "family": "press",
+      "processing_time": 12,
+      "due_date": 84,
+      "weight": 5
     },
     {
       "id": "j07",
-      "family": "forge",
-      "processing_time": 11,
-      "due_date": 8,
+      "family": "grind",
+      "processing_time": 9,
+      "due_date": 79,
       "weight": 4
     },
     {
       "id": "j08",
-      "family": "mill",
-      "processing_time": 9,
-      "due_date": 54,
-      "weight": 1
-    },
-    {
-      "id": "j09",
-      "family": "mill",
-      "processing_time": 10,
-      "due_date": 39,
-      "weight": 5
-    },
-    {
-      "id": "j10",
-      "family": "mill",
-      "processing_time": 8,
-      "due_date": 22,
+      "family": "grind",
+      "processing_time": 11,
+      "due_date": 64,
       "weight": 2
     },
     {
-      "id": "j11",
-      "family": "weld",
-      "processing_time": 7,
-      "due_date": 9,
+      "id": "j09",
+      "family": "forge",
+      "processing_time": 3,
+      "due_date": 50,
+      "weight": 2
+    },
+    {
+      "id": "j10",
+      "family": "press",
+      "processing_time": 12,
+      "due_date": 89,
       "weight": 4
+    },
+    {
+      "id": "j11",
+      "family": "press",
+      "processing_time": 6,
+      "due_date": 48,
+      "weight": 5
+    },
+    {
+      "id": "j12",
+      "family": "press",
+      "processing_time": 5,
+      "due_date": 63,
+      "weight": 4
+    },
+    {
+      "id": "j13",
+      "family": "press",
+      "processing_time": 9,
+      "due_date": 82,
+      "weight": 4
+    },
+    {
+      "id": "j14",
+      "family": "weld",
+      "processing_time": 4,
+      "due_date": 67,
+      "weight": 2
+    },
+    {
+      "id": "j15",
+      "family": "press",
+      "processing_time": 4,
+      "due_date": 44,
+      "weight": 3
+    },
+    {
+      "id": "j16",
+      "family": "plate",
+      "processing_time": 6,
+      "due_date": 72,
+      "weight": 5
+    },
+    {
+      "id": "j17",
+      "family": "plate",
+      "processing_time": 12,
+      "due_date": 61,
+      "weight": 4
+    },
+    {
+      "id": "j18",
+      "family": "plate",
+      "processing_time": 5,
+      "due_date": 86,
+      "weight": 2
+    },
+    {
+      "id": "j19",
+      "family": "mill",
+      "processing_time": 6,
+      "due_date": 63,
+      "weight": 1
     }
   ],
   "precedence": [
     [
-      "j00",
-      "j07"
+      "j02",
+      "j17"
     ],
     [
-      "j01",
-      "j11"
+      "j04",
+      "j16"
     ],
     [
-      "j03",
-      "j09"
+      "j05",
+      "j13"
     ],
     [
-      "j03",
-      "j10"
+      "j08",
+      "j17"
     ],
     [
-      "j06",
-      "j11"
+      "j12",
+      "j17"
     ],
     [
-      "j09",
-      "j11"
+      "j15",
+      "j19"
     ]
   ]
 }

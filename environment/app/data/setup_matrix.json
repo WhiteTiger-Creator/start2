@@ -2,32 +2,58 @@
   "initial_family": "forge",
   "families": [
     "forge",
+    "grind",
     "mill",
+    "plate",
     "press",
     "weld"
   ],
   "setup": {
     "forge": {
       "forge": 1,
+      "grind": 8,
       "mill": 6,
+      "plate": 4,
       "press": 5,
       "weld": 7
     },
+    "grind": {
+      "forge": 8,
+      "grind": 2,
+      "mill": 3,
+      "plate": 6,
+      "press": 7,
+      "weld": 5
+    },
     "mill": {
       "forge": 6,
+      "grind": 3,
       "mill": 1,
+      "plate": 7,
       "press": 4,
       "weld": 6
     },
+    "plate": {
+      "forge": 4,
+      "grind": 6,
+      "mill": 7,
+      "plate": 1,
+      "press": 2,
+      "weld": 8
+    },
     "press": {
       "forge": 5,
+      "grind": 6,
       "mill": 4,
+      "plate": 2,
       "press": 1,
       "weld": 3
     },
     "weld": {
       "forge": 7,
+      "grind": 5,
       "mill": 6,
+      "plate": 8,
       "press": 3,
       "weld": 2
     }

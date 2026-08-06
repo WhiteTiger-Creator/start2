@@ -12,6 +12,9 @@
     "mill": {
       "weight_multiplier": 1,
       "tardiness_grace": 2
+    },
+    "grind": {
+      "weight_multiplier": 3
     }
   }
 }

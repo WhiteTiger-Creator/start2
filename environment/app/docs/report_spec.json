@@ -14,6 +14,8 @@
       "scheduling_policy": "/app/data/scheduling_policy.json"
     },
     "generalization_contract": "Graded on behaviour, not source text. The emitted order must be precedence-feasible and must attain the governance objective's proven minimum on the shipped instance and on an alternate --input instance, and be identical on reruns. Hardcoded, stubbed or fixture-copied outputs fail. The objective (weighted tardiness with sequence-dependent setups and precedence) is NP-hard: a greedy priority rule (WSPT, EDD) is measurably suboptimal on the shipped instances, and no third-party solver library may be used. Delegating to an optimisation/solver or graph library is prohibited and rejected by a static check; implement the exact optimisation yourself.",
+    "runtime_budget_seconds": 120,
+    "runtime_budget_note": "Operational ceiling, enforced by the verifier: one full run of /app/workflow/scheduler.py on a graded instance (the shipped instance, or an alternate instance of comparable size supplied through --input) must complete within this many seconds of wall-clock time. The shipped instances are sized so that an exact optimiser which prunes dominated states finishes well inside the budget and an unpruned enumeration of scheduler states does not.",
     "prohibited_imports": ["ortools", "pulp", "scipy", "numpy", "networkx", "cvxpy", "gurobipy", "mip"],
     "prohibited_dynamic_execution": ["eval", "exec", "compile"]
   },

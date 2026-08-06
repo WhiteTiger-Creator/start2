@@ -1,16 +1,31 @@
 #!/usr/bin/env python3
-"""Single-machine batch scheduler — governance dialect (EXACT optimizer).
+"""Single-machine batch scheduler — governance dialect (exact optimizer).
 
-Assigns an order to the jobs on one machine to MINIMISE total weighted
+Assigns an order to the jobs on one machine to minimise total weighted
 tardiness under sequence-dependent (family) setup times and precedence
 constraints, then emits the schedule, the objective breakdown and a summary.
 
 This objective (1 | s_ij, prec | sum w_j T_j) is NP-hard: no greedy priority
-rule (WSPT, EDD, ...) is optimal on crafted instances, and no standard library
-solves it for you. The optimum here is computed exactly with a subset dynamic
-program over (remaining jobs, last family, current time); among all sequences
-that attain the minimum objective the governance tie-break selects the
-lexicographically-smallest job-id order. Standard library only.
+rule (WSPT, EDD, ...) is optimal on the shipped instances, and no standard
+library solves it. The optimum is computed exactly by a subset dynamic program
+over (scheduled_mask, last_family). Because the jobs already scheduled fix the
+sum of their processing times, a partial schedule's clock is determined by the
+setup time it has accumulated, so each state carries a Pareto frontier of
+(accumulated_setup, best_value) points and drops every dominated point: a point
+with at least as much accumulated setup and a value no better than another
+point of the same state can never lead to a better completion, because the
+remaining jobs, their feasible orders and their setups are identical and the
+cost of every completion is non-decreasing in the clock. That dominance pruning
+is what keeps the state space tractable; enumerating (mask, last_family, clock)
+without it does not finish.
+
+The governance tie-break (lexicographically smallest job-id sequence among all
+orders attaining the minimum) is carried inside the dynamic program instead of
+being reconstructed afterwards: each state's value packs the objective in the
+high digits and the sequence of job ranks so far in the low digits of a single
+integer, so comparing values compares objective first and the job-id order
+second, and the dominance rule stays exact. Standard library only, fully
+deterministic.
 """
 
 from __future__ import annotations
@@ -18,7 +33,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import sys
 from pathlib import Path
 
 DEFAULT_INPUT = "/app/data/jobs.json"
@@ -78,85 +92,116 @@ def policy_checksum(policy_data: dict) -> str:
 
 
 # --------------------------------------------------------------------------
-# Exact optimizer: subset DP over (remaining_mask, last_family, current_time)
-# with governance lexicographic-minimum tie-break (#SCH-5120..#SCH-5146)
+# Exact optimizer: subset DP over (scheduled_mask, last_family) carrying a
+# dominance-pruned Pareto frontier over accumulated setup, with the governance
+# lexicographic tie-break folded into the state value (#SCH-5101..#SCH-5145).
 # --------------------------------------------------------------------------
-def _pred_masks(jobs: list[dict], precedence: list) -> list[int]:
-    idx = {j["id"]: i for i, j in enumerate(jobs)}
+def _predecessor_masks(jobs: list[dict], precedence: list, index: dict) -> list[int]:
     pred = [0] * len(jobs)
     for edge in precedence:
-        a, b = edge[0], edge[1]      # a must run before b
-        if a in idx and b in idx:
-            pred[idx[b]] |= (1 << idx[a])
+        before, after = str(edge[0]), str(edge[1])
+        if before in index and after in index:
+            pred[index[after]] |= 1 << index[before]
     return pred
 
 
 def optimize(jobs: list[dict], precedence: list, setup: dict, initial_family: str,
              policy_data: dict) -> tuple[int, list[str]]:
+    """Return (minimum total weighted tardiness, lexicographically smallest optimal order)."""
+    jobs = sorted(jobs, key=lambda j: j["id"])
     n = len(jobs)
-    fam = [j["family"] for j in jobs]
-    p = [j["processing_time"] for j in jobs]
-    d = [j["due_date"] for j in jobs]
-    w = [j["weight"] for j in jobs]
-    pol = [resolve_policy(f, policy_data) for f in fam]
-    eff_w = [w[i] * pol[i]["weight_multiplier"] for i in range(n)]
-    grace = [pol[i]["tardiness_grace"] for i in range(n)]
-    pred = _pred_masks(jobs, precedence)
+    if n == 0:
+        return 0, []
+
+    family_names = sorted(setup)
+    family_index = {name: k for k, name in enumerate(family_names)}
+    setup_cost = [[setup[a][b] for b in family_names] for a in family_names]
+
+    family_of = [family_index[j["family"]] for j in jobs]
+    processing = [j["processing_time"] for j in jobs]
+    policies = [resolve_policy(j["family"], policy_data) for j in jobs]
+    deadline = [jobs[i]["due_date"] + policies[i]["tardiness_grace"] for i in range(n)]
+    weight = [jobs[i]["weight"] * policies[i]["weight_multiplier"] for i in range(n)]
+    index = {j["id"]: i for i, j in enumerate(jobs)}
+    pred = _predecessor_masks(jobs, precedence, index)
+
+    # Value packing: value = objective * lex_scale + lexicographic key, where the
+    # lexicographic key is the base-`radix` number whose digits are the job ranks
+    # (rank = position in ascending job-id order) in machine-run order. Every
+    # state at a given depth holds the same number of digits, so comparing packed
+    # values compares the objective first and the job-id sequence second.
+    radix = n if n > 1 else 2
+    lex_scale = radix ** n
+    digit_weight = [radix ** (n - 1 - depth) for depth in range(n)]
+
     full = (1 << n) - 1
+    processing_sum = [0] * (1 << n)
+    for mask in range(1, 1 << n):
+        low = mask & -mask
+        processing_sum[mask] = processing_sum[mask ^ low] + processing[low.bit_length() - 1]
 
-    sys.setrecursionlimit(100000)
-    memo: dict = {}
+    # layer: {scheduled_mask: {last_family: [(accumulated_setup, packed_value), ...]}}
+    layer: dict = {0: {family_index[initial_family]: [(0, 0)]}}
+    for depth in range(n):
+        weight_here = digit_weight[depth]
+        nxt: dict = {}
+        for mask, by_family in layer.items():
+            eligible = []
+            rest = ~mask & full
+            while rest:
+                low = rest & -rest
+                rest ^= low
+                job = low.bit_length() - 1
+                if pred[job] & ~mask == 0:
+                    eligible.append((family_of[job], mask | low, processing_sum[mask] + processing[job],
+                                     deadline[job], weight[job], job * weight_here))
+            for last_family, frontier in by_family.items():
+                row = setup_cost[last_family]
+                for family, new_mask, base_clock, due, job_weight, lex_add in eligible:
+                    changeover = row[family]
+                    target = nxt.get(new_mask)
+                    if target is None:
+                        target = nxt[new_mask] = {}
+                    reached = target.get(family)
+                    if reached is None:
+                        reached = target[family] = {}
+                    reached_get = reached.get
+                    for accumulated, value in frontier:
+                        setup_total = accumulated + changeover
+                        late = base_clock + setup_total - due
+                        new_value = value + lex_add
+                        if late > 0:
+                            new_value += job_weight * late * lex_scale
+                        seen = reached_get(setup_total)
+                        if seen is None or new_value < seen:
+                            reached[setup_total] = new_value
+        # Dominance pruning: walking accumulated setup upwards, keep a point only
+        # if it strictly improves on every point reachable with less setup.
+        for by_family in nxt.values():
+            for last_family, reached in by_family.items():
+                best = None
+                frontier = []
+                for setup_total in sorted(reached):
+                    value = reached[setup_total]
+                    if best is None or value < best:
+                        frontier.append((setup_total, value))
+                        best = value
+                by_family[last_family] = frontier
+        layer = nxt
 
-    def g(remaining: int, last_family: str, t: int) -> int:
-        if remaining == 0:
-            return 0
-        key = (remaining, last_family, t)
-        cached = memo.get(key)
-        if cached is not None:
-            return cached
-        best = None
-        m = remaining
-        while m:
-            bit = m & (-m)
-            m ^= bit
-            i = bit.bit_length() - 1
-            if pred[i] & remaining:
-                continue                      # a predecessor is still unscheduled
-            newt = t + setup[last_family][fam[i]] + p[i]
-            cost = eff_w[i] * max(0, newt - d[i] - grace[i])
-            total = cost + g(remaining ^ bit, fam[i], newt)
-            if best is None or total < best:
-                best = total
-        memo[key] = best
-        return best
-
-    opt = g(full, initial_family, 0)
-
-    # Governance tie-break: reconstruct the lexicographically-smallest job-id
-    # order among all optimal sequences.
-    order = sorted(range(n), key=lambda i: jobs[i]["id"])
-    seq: list[str] = []
-    remaining = full
-    last_family = initial_family
-    t = 0
-    while remaining:
-        picked = None
-        for i in order:
-            bit = 1 << i
-            if not (remaining & bit) or (pred[i] & remaining):
-                continue
-            newt = t + setup[last_family][fam[i]] + p[i]
-            cost = eff_w[i] * max(0, newt - d[i] - grace[i])
-            if cost + g(remaining ^ bit, fam[i], newt) == g(remaining, last_family, t):
-                picked, pnewt = i, newt
-                break
-        if picked is None:
-            raise RuntimeError("reconstruction failed; DP inconsistent")
-        seq.append(jobs[picked]["id"])
-        remaining ^= (1 << picked)
-        last_family = fam[picked]
-        t = pnewt
-    return opt, seq
+    best = None
+    for by_family in layer.values():
+        for frontier in by_family.values():
+            for _setup_total, value in frontier:
+                if best is None or value < best:
+                    best = value
+    objective, lex_key = divmod(best, lex_scale)
+    ranks = []
+    for _ in range(n):
+        lex_key, digit = divmod(lex_key, radix)
+        ranks.append(digit)
+    ranks.reverse()
+    return objective, [jobs[rank]["id"] for rank in ranks]
 
 
 # --------------------------------------------------------------------------
@@ -282,10 +327,11 @@ def run(input_path: str, output_dir: str) -> None:
     assert objective["total_weighted_tardiness"] == opt
 
     families_present = sorted({j["family"] for j in jobs})
+    family_by_id = {j["id"]: j["family"] for j in jobs}
     transitions = set()
     prev = initial_family
     for jid in sequence:
-        fam = next(j["family"] for j in jobs if j["id"] == jid)
+        fam = family_by_id[jid]
         transitions.add((prev, fam))
         prev = fam
 

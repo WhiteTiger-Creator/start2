@@ -18,11 +18,20 @@ its FINAL dated decision. Second, the objective the board fixed -- minimum total
 machine with sequence-dependent family setup times and precedence constraints -- is NP-hard: because the
 setup cost depends on which job ran immediately before, completion times depend on the whole order, so no
 per-job priority rule (weighted-shortest-processing-time, earliest-due-date) is optimal, and the shipped
-greedy scheduler is measurably worse than the board's optimum on the crafted instances. The engineer must
-implement an exact optimiser -- a subset dynamic program over (remaining jobs, last family, current time)
-with the governance tie-break -- rather than delegate to a solver library, and must first contain a
-compromised host (revoking planted persistence and escalation and removing an exposed plaintext secret)
-before the restore is accepted. Holding the interacting rule set, the exact-optimisation requirement, the
+greedy scheduler is measurably worse than the board's optimum on the shipped instances. Third, and this is
+what makes the exact optimisation an engineering problem rather than a textbook exercise, the graded
+instances are scaled to 20 jobs over 6 families with deliberately sparse precedence (6-7 edges, which prunes
+almost nothing), and instruction.md, the output contract and the verifier all impose a 120-second wall-clock
+budget on a single run. The obvious exact formulation -- memoising on (remaining jobs, last family, current
+clock) -- exhausts a 3.5 GB heap on the shipped instance without ever returning, because the clock takes
+hundreds of distinct values per subset. To fit the budget the engineer has to notice that a partial
+schedule's clock is fixed by the setups it has accumulated, carry a Pareto frontier of
+(accumulated_setup, value) points per (mask, last_family) state and discard dominated points, and then
+implement the governance lexicographic tie-break so that pruning stays exact -- the reference optimiser
+lands at roughly 20 seconds, six times inside the budget. On top of that the engineer must first contain a
+compromised host (revoking planted persistence and escalation and removing an exposed plaintext secret,
+which the verifier checks across the whole artifact rather than one directory) before the restore is
+accepted. Holding the interacting rule set, the exact-optimisation requirement under a runtime ceiling, the
 byte-level output contract and the containment end-states in mind at once is what separates a correct
 reconstruction from a plausible-looking greedy one.
 '''
@@ -35,31 +44,47 @@ batch-rollout-automation) from /app/host/authorized_keys, deletes the passwordle
 /app/host/exposed/scheduler_signing.key so the secret string no longer appears under /app -- then copies
 scheduler_fixed.py over /app/workflow/scheduler.py and runs it. The optimiser reads the jobs+precedence
 instance, the fixed family setup matrix and the scheduling policy, resolves the per-family policy, and
-computes the exact minimum total weighted tardiness with a subset dynamic program over (remaining-job set,
-last family, current time): completion times accumulate setup-before-processing from the machine's initial
-family, tardiness is graced per family and weighted by the per-family multiplier, and precedence is enforced
-by only expanding eligible jobs. Among all optimal orders it reconstructs the lexicographically-smallest
-job-id sequence (the governance tie-break), then replays that order to emit schedule.json, objective.json
-and summary.json with the contracted checksums. Every governing value is traced to its final entry in
+computes the exact minimum total weighted tardiness with a subset dynamic program over
+(scheduled-job set, last family): completion times accumulate setup-before-processing from the machine's
+initial family, tardiness is graced per family and weighted by the per-family multiplier, and precedence is
+enforced by only expanding eligible jobs. Because the scheduled set fixes the processing time consumed so
+far, each state carries a Pareto frontier over accumulated setup time and every dominated point (no less
+setup, no better value) is dropped -- the dominance pruning that brings a 20-job instance from
+"does not finish" down to roughly 20 seconds. The governance tie-break is folded into the state value
+rather than reconstructed afterwards: each value packs the objective above the base-n digits of the job
+ranks placed so far, so a single integer comparison orders by objective first and job-id sequence second and
+the dominance rule stays exact, and the winning value decodes directly into the lexicographically-smallest
+optimal order. That order is replayed to emit schedule.json, objective.json and summary.json with the
+contracted checksums. Every governing value is traced to its final entry in
 /app/incident/scheduling_governance_log.md; report_spec.json supplies only the output contract.
 '''
 verification_explanation = '''
 The separate verifier (tests/Dockerfile builds an isolated image the agent cannot see) collects the agent's
 whole /app as the declared artifact and runs tests/test_outputs.py against it. It executes the agent's
-/app/workflow/scheduler.py as a subprocess under an unprivileged uid (65534 via setpriv, inputs staged into
-a candidate-writable work area) on both the shipped instance and a held-out alternate instance, and diffs
-schedule.json, objective.json and summary.json byte-for-byte against sealed fixtures generated from the
-reference. It independently re-derives the objective from the agent's emitted order with a simple simulator
-and asserts the order is precedence-feasible and attains the reference optimum, and it proves heuristics
-fail: a weighted-shortest-processing-time and an earliest-due-date order are both computed and shown to be
-strictly worse than the optimum on the shipped and alternate instances, and on a crafted micro-instance the
-WSPT order's objective is strictly larger than the agent's optimal objective. The exact optimum itself was
-validated offline against brute force over all feasible permutations on tiny instances. A static AST scan
-forbids importing solver/graph libraries (ortools, pulp, scipy, numpy, networkx, ...) and dynamic execution
-(eval/exec/compile). The frozen broken snapshot /app/workflow/.scheduler.original is asserted wrong by hash
-and by objective (its greedy order exceeds the optimum). Containment is graded by content/existence under
-/app. Confirmed locally in the real two-container flow: after solve.sh the verifier gives reward 1; a fresh
-environment with no solve.sh (the greedy scheduler still in place) gives 0.
+/app/workflow/scheduler.py as a subprocess under an unprivileged uid (65534 via setpriv, a minimal explicit
+environment rather than the verifier's own, inputs staged into a candidate-writable work area) on both the
+shipped instance and a held-out alternate instance, and diffs schedule.json, objective.json and summary.json
+byte-for-byte against sealed fixtures generated from the reference. It independently re-derives the objective
+from the agent's emitted order with a simple simulator and asserts the order is precedence-feasible and
+attains the reference optimum, and it proves heuristics fail: a weighted-shortest-processing-time and an
+earliest-due-date order are both computed and shown to be strictly worse than the optimum on the shipped and
+alternate instances, and on a crafted micro-instance the WSPT order's objective is strictly larger than the
+agent's optimal objective. The exact optimum itself was validated offline against brute force over all
+feasible permutations on hundreds of random tiny instances, sequence and value. Each graded instance is run
+once per session and every test reuses that run: the suite also times those two runs and asserts each
+finished inside the 120-second wall-clock budget that instruction.md and report_spec.json state (the
+reference needs about a fifth of it; an exact optimiser without dominance pruning cannot finish at all), and
+a hard subprocess timeout keeps a runaway submission from consuming the verifier timeout. The cheap
+policy/source-path and idempotency probes deliberately use a small instance so the whole suite stays around
+two minutes. A static AST scan forbids importing solver/graph libraries (ortools, pulp, scipy, numpy,
+networkx, ...) and dynamic execution (eval/exec/compile). The frozen broken snapshot
+/app/workflow/.scheduler.original is asserted wrong by hash and by objective (its greedy order exceeds the
+optimum). Containment is graded by content/existence, and the leaked signing secret is searched for across
+the whole of /app (every file except the containment checklist that legitimately quotes it), so moving the
+secret elsewhere in the artifact does not pass. Confirmed locally in the real two-container flow: after
+solve.sh the verifier gives reward 1 on repeated fresh artifacts; a fresh environment with no solve.sh (the
+greedy scheduler still in place) gives 0, and so does an otherwise-correct solve with the secret replanted
+under /app/docs.
 '''
 relevant_experience = '''
 Experience reconstructing a stateful sequencing/optimisation policy from an authoritative but noisy decision

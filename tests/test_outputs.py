@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,19 @@ SCHEDULE_KEYS = set(SPEC["schedule_json"]["required_fields"])
 OBJECTIVE_KEYS = set(SPEC["objective_json"]["required_fields"])
 SUMMARY_KEYS = set(SPEC["summary_json"]["required_fields"])
 
+# Documented wall-clock budget for one full scheduler run on a graded instance.
+# instruction.md and report_spec.json state the same number; it is ~6x the
+# reference optimizer's measured time on these instances, so a dominance-pruned
+# exact optimizer has ample headroom while an unpruned state enumeration cannot
+# finish. Kept as a literal here (never read from the mutable /app spec) so the
+# budget cannot be relaxed by editing the environment.
+RUNTIME_BUDGET_SEC = 120.0
+# Hard kill for a runaway submission, so one hung run cannot consume the whole
+# verifier timeout. Comfortably above the graded budget.
+HARD_TIMEOUT_SEC = 300
+
+# Tiny crafted instance: proves the governance optimum genuinely deviates from a
+# weighted-shortest-processing-time order.
 MICRO_JOBS = [
     {"id": "m00", "family": "mill", "processing_time": 6, "due_date": 59, "weight": 4},
     {"id": "m01", "family": "weld", "processing_time": 7, "due_date": 41, "weight": 1},
@@ -42,8 +56,23 @@ MICRO_JOBS = [
     {"id": "m04", "family": "press", "processing_time": 4, "due_date": 9, "weight": 3},
 ]
 MICRO_PREC = [["m00", "m04"], ["m01", "m04"], ["m02", "m03"]]
-MICRO_OPT = 210
-MICRO_WSPT = 297
+MICRO_OPT = FIXTURE["micro_optimum"]
+MICRO_WSPT = FIXTURE["micro_wspt"]
+
+# Small instance used by the policy / source-path influence and idempotency
+# checks, so those runs stay cheap and the whole suite stays far inside the
+# verifier timeout. The graded instances are the big ones.
+SMALL_JOBS = [
+    {"id": "s00", "family": "forge", "processing_time": 12, "due_date": 41, "weight": 3},
+    {"id": "s01", "family": "plate", "processing_time": 8, "due_date": 7, "weight": 1},
+    {"id": "s02", "family": "press", "processing_time": 4, "due_date": 27, "weight": 4},
+    {"id": "s03", "family": "forge", "processing_time": 13, "due_date": 23, "weight": 1},
+    {"id": "s04", "family": "mill", "processing_time": 7, "due_date": 36, "weight": 2},
+    {"id": "s05", "family": "weld", "processing_time": 12, "due_date": 36, "weight": 1},
+    {"id": "s06", "family": "mill", "processing_time": 8, "due_date": 14, "weight": 5},
+    {"id": "s07", "family": "plate", "processing_time": 8, "due_date": 39, "weight": 5},
+]
+SMALL_PREC = [["s00", "s05"], ["s01", "s05"], ["s01", "s07"], ["s03", "s05"], ["s05", "s06"]]
 
 
 def _load_json(path: Path):
@@ -63,6 +92,10 @@ def _write_json(path: Path, value: object) -> None:
 _CWORK = Path("/candidate-work")
 _run_ctr = itertools.count()
 _SETPRIV = ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", "--no-new-privs"]
+# The submitted program never inherits the verifier's environment: it is handed a
+# minimal explicit one, so nothing about the grading process (paths, tokens,
+# python configuration) leaks into it and it cannot depend on it.
+CHILD_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/candidate-work", "LANG": "C.UTF-8"}
 
 
 def _candidate_dir() -> Path:
@@ -75,10 +108,12 @@ def _candidate_dir() -> Path:
 def _run_agent(argv, cwd: Path):
     return subprocess.run(
         _SETPRIV + argv, check=True, capture_output=True, text=True, cwd=str(cwd),
+        env=dict(CHILD_ENV), timeout=HARD_TIMEOUT_SEC,
     )
 
 
 def _run_pipeline(tmp_path: Path, script_path: Path = WORKFLOW_PATH, input_path: Path = DEFAULT_INPUT):
+    """Run the submitted scheduler once; returns its outputs and its wall-clock time."""
     work = _candidate_dir()
     out_dir = work / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -86,20 +121,37 @@ def _run_pipeline(tmp_path: Path, script_path: Path = WORKFLOW_PATH, input_path:
     staged_input = work / "input.json"
     shutil.copy(str(input_path), str(staged_input))
     os.chmod(staged_input, 0o644)
+    started = time.monotonic()
     result = _run_agent(
         [sys.executable, str(script_path), "--input", str(staged_input), "--output-dir", str(out_dir)],
         cwd=work,
     )
+    elapsed = time.monotonic() - started
     assert result.returncode == 0
     schedule = _load_json(out_dir / "schedule.json")
     objective = _load_json(out_dir / "objective.json")
     summary = _load_json(out_dir / "summary.json")
-    return out_dir, summary, schedule, objective
+    return out_dir, summary, schedule, objective, elapsed
 
 
+def _run_instance(tmp_path: Path, jobs, precedence):
+    """Run the submitted scheduler on an instance defined inline (kept small)."""
+    input_path = _candidate_dir() / "instance.json"
+    _write_json(input_path, {"jobs": jobs, "precedence": precedence})
+    os.chmod(input_path, 0o644)
+    return _run_pipeline(tmp_path, input_path=input_path)
+
+
+# The graded instances are run once each for the whole session and every test
+# reuses those outputs: the exact optimizer is the expensive part of the suite.
 @pytest.fixture(scope="session")
 def primary_outputs(tmp_path_factory):
     return _run_pipeline(tmp_path_factory.mktemp("primary"))
+
+
+@pytest.fixture(scope="session")
+def alternate_outputs(tmp_path_factory):
+    return _run_pipeline(tmp_path_factory.mktemp("alternate"), input_path=ALT_INPUT)
 
 
 # --------------------------------------------------------------------------
@@ -206,23 +258,23 @@ def test_cli_exists():
 
 
 def test_output_dir_contains_exactly_three_files(primary_outputs):
-    out_dir, _, _, _ = primary_outputs
+    out_dir, _, _, _, _ = primary_outputs
     names = sorted(p.name for p in out_dir.iterdir() if p.is_file())
     assert names == ["objective.json", "schedule.json", "summary.json"]
 
 
 def test_primary_summary_matches_fixture(primary_outputs):
-    _, summary, _, _ = primary_outputs
+    _, summary, _, _, _ = primary_outputs
     assert summary == FIXTURE["primary"]["summary"]
 
 
 def test_primary_schedule_matches_fixture(primary_outputs):
-    _, _, schedule, _ = primary_outputs
+    _, _, schedule, _, _ = primary_outputs
     assert schedule == FIXTURE["primary"]["schedule"]
 
 
 def test_primary_objective_matches_fixture(primary_outputs):
-    _, _, _, objective = primary_outputs
+    _, _, _, objective, _ = primary_outputs
     assert objective == FIXTURE["primary"]["objective"]
 
 
@@ -230,7 +282,7 @@ def test_primary_objective_matches_fixture(primary_outputs):
 # Schemas
 # --------------------------------------------------------------------------
 def test_summary_schema(primary_outputs):
-    _, summary, _, _ = primary_outputs
+    _, summary, _, _, _ = primary_outputs
     assert set(summary) == SUMMARY_KEYS
     assert summary["schema_version"] == "sched-wt-v1"
     assert isinstance(summary["weighted_tardiness_by_family"], dict)
@@ -240,7 +292,7 @@ def test_summary_schema(primary_outputs):
 
 
 def test_objective_schema(primary_outputs):
-    _, _, _, objective = primary_outputs
+    _, _, _, objective, _ = primary_outputs
     assert set(objective) == OBJECTIVE_KEYS
     assert objective["schema_version"] == "sched-wt-v1"
     assert objective["job_count"] == len(objective["sequence"])
@@ -248,7 +300,7 @@ def test_objective_schema(primary_outputs):
 
 
 def test_schedule_schema_and_ordering(primary_outputs):
-    _, _, schedule, _ = primary_outputs
+    _, _, schedule, _, _ = primary_outputs
     assert set(schedule) == {"sequence", "initial_family", "placements"}
     setup, _ = _load_setup()
     placements = schedule["placements"]
@@ -263,7 +315,7 @@ def test_schedule_schema_and_ordering(primary_outputs):
 
 
 def test_schedule_objective_summary_consistent(primary_outputs):
-    _, summary, schedule, objective = primary_outputs
+    _, summary, schedule, objective, _ = primary_outputs
     assert schedule["sequence"] == objective["sequence"]
     placements = schedule["placements"]
     assert objective["total_weighted_tardiness"] == sum(p["weighted_tardiness"] for p in placements)
@@ -281,7 +333,7 @@ def test_schedule_objective_summary_consistent(primary_outputs):
 # The hard core: the emitted order must be OPTIMAL and feasible; heuristics fail.
 # --------------------------------------------------------------------------
 def test_agent_schedule_is_optimal_and_feasible(primary_outputs):
-    _, _, schedule, objective = primary_outputs
+    _, _, schedule, objective, _ = primary_outputs
     jobs, prec = _load_instance(DEFAULT_INPUT)
     setup, initial = _load_setup()
     policy = _load_json(POLICY_PATH)
@@ -303,8 +355,8 @@ def test_greedy_heuristics_are_strictly_suboptimal():
     assert e > opt, f"EDD ({e}) must be strictly worse than the optimum ({opt})"
 
 
-def test_agent_optimal_and_greedy_suboptimal_on_alternate(tmp_path: Path):
-    _, _, schedule, objective = _run_pipeline(tmp_path, input_path=ALT_INPUT)
+def test_agent_optimal_and_greedy_suboptimal_on_alternate(alternate_outputs):
+    _, _, schedule, objective, _ = alternate_outputs
     jobs, prec = _load_instance(ALT_INPUT)
     setup, initial = _load_setup()
     policy = _load_json(POLICY_PATH)
@@ -324,9 +376,7 @@ def test_optimum_beats_wspt_on_crafted_instance(tmp_path: Path):
     policy = _load_json(POLICY_PATH)
     _, w = _wspt(MICRO_JOBS, MICRO_PREC, setup, initial, policy)
     assert w == MICRO_WSPT
-    input_path = tmp_path / "micro.json"
-    _write_json(input_path, {"jobs": MICRO_JOBS, "precedence": MICRO_PREC})
-    _, _, schedule, objective = _run_pipeline(tmp_path / "run", input_path=input_path)
+    _, _, schedule, objective, _ = _run_instance(tmp_path / "run", MICRO_JOBS, MICRO_PREC)
     assert _is_feasible(schedule["sequence"], MICRO_JOBS, MICRO_PREC)
     assert objective["total_weighted_tardiness"] == MICRO_OPT
     assert _objective_of(schedule["sequence"], MICRO_JOBS, setup, initial, policy) == MICRO_OPT
@@ -345,7 +395,7 @@ def test_original_snapshot_preserved():
 
 
 def test_broken_snapshot_is_wrong(tmp_path: Path):
-    _, broken_summary, broken_schedule, broken_obj = _run_pipeline(
+    _, broken_summary, broken_schedule, broken_obj, _ = _run_pipeline(
         tmp_path, script_path=ORIGINAL_WORKFLOW_PATH)
     broken_hash = hashlib.sha256(json.dumps(broken_summary, sort_keys=True).encode("utf-8")).hexdigest()
     assert broken_hash == FIXTURE["broken_summary_sha256"]
@@ -356,23 +406,47 @@ def test_broken_snapshot_is_wrong(tmp_path: Path):
 
 
 # --------------------------------------------------------------------------
+# Runtime budget: the documented wall-clock ceiling on one full graded run.
+# --------------------------------------------------------------------------
+def test_graded_runs_meet_documented_runtime_budget(primary_outputs, alternate_outputs):
+    """Each full scheduler run on a graded instance must finish inside the budget
+    instruction.md states. A pruned exact optimizer has ample headroom; an
+    unpruned enumeration of scheduler states does not."""
+    _, _, _, _, primary_elapsed = primary_outputs
+    _, _, _, _, alternate_elapsed = alternate_outputs
+    print(f"scheduler run: shipped instance {primary_elapsed:.1f}s, "
+          f"alternate instance {alternate_elapsed:.1f}s, budget {RUNTIME_BUDGET_SEC:.0f}s")
+    assert primary_elapsed < RUNTIME_BUDGET_SEC, (
+        f"the shipped instance took {primary_elapsed:.1f}s, over the {RUNTIME_BUDGET_SEC:.0f}s budget"
+    )
+    assert alternate_elapsed < RUNTIME_BUDGET_SEC, (
+        f"the alternate instance took {alternate_elapsed:.1f}s, over the {RUNTIME_BUDGET_SEC:.0f}s budget"
+    )
+
+
+def test_runtime_budget_is_stated_in_the_contract():
+    """The budget the verifier enforces is the one the environment documents."""
+    assert SPEC["workflow_repair"]["runtime_budget_seconds"] == int(RUNTIME_BUDGET_SEC)
+
+
+# --------------------------------------------------------------------------
 # Generalization / idempotency / CLI
 # --------------------------------------------------------------------------
 def test_pipeline_rerun_idempotent(tmp_path: Path):
-    _, sa, wa, qa = _run_pipeline(tmp_path / "a")
-    _, sb, wb, qb = _run_pipeline(tmp_path / "b")
+    _, sa, wa, qa, _ = _run_instance(tmp_path / "a", SMALL_JOBS, SMALL_PREC)
+    _, sb, wb, qb, _ = _run_instance(tmp_path / "b", SMALL_JOBS, SMALL_PREC)
     assert (sa, wa, qa) == (sb, wb, qb)
 
 
-def test_pipeline_supports_alternate_input(tmp_path: Path):
-    _, summary, schedule, objective = _run_pipeline(tmp_path, input_path=ALT_INPUT)
+def test_pipeline_supports_alternate_input(alternate_outputs):
+    _, summary, schedule, objective, _ = alternate_outputs
     assert summary == FIXTURE["alternate"]["summary"]
     assert schedule == FIXTURE["alternate"]["schedule"]
     assert objective == FIXTURE["alternate"]["objective"]
 
 
-def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
-    _, explicit_summary, _, _ = _run_pipeline(tmp_path)
+def test_cli_defaults_work_and_match_explicit_run(primary_outputs):
+    _, explicit_summary, _, _, _ = primary_outputs
     # The no-argument run writes to the default /app/output; clear any root-owned artifacts from
     # solve.sh and make the dir candidate-writable so the unprivileged program can populate it.
     default_out = Path("/app/output")
@@ -384,18 +458,19 @@ def test_cli_defaults_work_and_match_explicit_run(tmp_path: Path):
 
 
 # --------------------------------------------------------------------------
-# Source-path influence
+# Source-path influence (run on the small instance: these probe where the inputs
+# are read from, not the optimizer, so they need not pay for a graded run)
 # --------------------------------------------------------------------------
 def test_setup_matrix_source_path_affects_output(tmp_path: Path):
     original = SETUP_PATH.read_text(encoding="utf-8")
     try:
-        _, summary_a, _, obj_a = _run_pipeline(tmp_path / "a")
+        _, summary_a, _, obj_a, _ = _run_instance(tmp_path / "a", SMALL_JOBS, SMALL_PREC)
         data = json.loads(original)
         for src in data["setup"]:
             for dst in data["setup"][src]:
                 data["setup"][src][dst] = int(data["setup"][src][dst]) + 100
         SETUP_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        _, summary_b, _, obj_b = _run_pipeline(tmp_path / "b")
+        _, summary_b, _, obj_b, _ = _run_instance(tmp_path / "b", SMALL_JOBS, SMALL_PREC)
         assert summary_a["setup_matrix_checksum"] != summary_b["setup_matrix_checksum"]
         assert obj_a["total_weighted_tardiness"] != obj_b["total_weighted_tardiness"]
         assert summary_a != summary_b
@@ -406,11 +481,11 @@ def test_setup_matrix_source_path_affects_output(tmp_path: Path):
 def test_policy_source_path_affects_output(tmp_path: Path):
     original = POLICY_PATH.read_text(encoding="utf-8")
     try:
-        _, summary_a, _, _ = _run_pipeline(tmp_path / "a")
+        _, summary_a, _, _, _ = _run_instance(tmp_path / "a", SMALL_JOBS, SMALL_PREC)
         data = json.loads(original)
         data.setdefault("default", {})["weight_multiplier"] = 7
         POLICY_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        _, summary_b, _, _ = _run_pipeline(tmp_path / "b")
+        _, summary_b, _, _, _ = _run_instance(tmp_path / "b", SMALL_JOBS, SMALL_PREC)
         assert summary_a["policy_checksum"] != summary_b["policy_checksum"]
         assert summary_a != summary_b
     finally:
@@ -449,7 +524,7 @@ def test_policy_baseline_fallback_for_omitted_fields():
 
 
 def test_policy_checksum_consistent(primary_outputs):
-    _, summary, _, _ = primary_outputs
+    _, summary, _, _, _ = primary_outputs
     data = _load_json(POLICY_PATH)
     lines = ["default|" + "|".join(str(_resolve_fields("__default__", data)[f]) for f in POLICY_FIELDS)]
     for family in sorted(data.get("family_overrides", {})):
@@ -546,6 +621,7 @@ def test_submitted_program_runs_unprivileged_and_cannot_write_reward(tmp_path: P
     res = subprocess.run(
         _SETPRIV + [sys.executable, str(probe)],
         capture_output=True, text=True, cwd=str(_CWORK), check=False,
+        env=dict(CHILD_ENV), timeout=HARD_TIMEOUT_SEC,
     )
     assert res.stdout.strip().splitlines()[0] == "65534", "submitted program must run as uid 65534"
     assert res.returncode != 0 and "Permission denied" in res.stderr, (
@@ -564,7 +640,21 @@ SUDOERS_DROPIN = Path("/app/host/sudoers.d/batch-rollout")
 EXPOSED_SECRET = Path("/app/host/exposed/scheduler_signing.key")
 ROGUE_KEY_COMMENT = "batch-rollout-automation"
 SIGNING_SECRET = "scheduler-signing-synthetic-3d2c1b0a9f8e-DO-NOT-USE"
-HOST_ROOT = Path("/app/host")
+APP_ROOT = Path("/app")
+# The containment checklist is the one file that legitimately quotes the secret:
+# it declares the end-state ("this string must not appear"). It is exempt from the
+# scan only while it is byte-identical to the shipped checklist, so it cannot be
+# used as a hiding place; a rewritten checklist (an agent redacting it is fine) is
+# scanned like everything else. Every other file under /app must be clear of the
+# secret, so relocating it is not containment.
+CHECKLIST_PATH = Path("/app/data/containment_checklist.json")
+
+
+def _secret_quote_allowed(path: Path) -> bool:
+    return (
+        path == CHECKLIST_PATH
+        and hashlib.sha256(path.read_bytes()).hexdigest() == FIXTURE["containment_checklist_sha256"]
+    )
 
 
 def test_rogue_ssh_key_line_revoked():
@@ -580,10 +670,13 @@ def test_sudoers_escalation_removed():
 def test_exposed_signing_secret_removed():
     if EXPOSED_SECRET.exists():
         assert SIGNING_SECRET not in EXPOSED_SECRET.read_text(encoding="utf-8")
-    for path in HOST_ROOT.rglob("*"):
-        if path.is_file():
-            try:
-                content = path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-            assert SIGNING_SECRET not in content, f"exposed secret still present in {path}"
+    # Scan the whole artifact, not just /app/host: moving the secret somewhere
+    # else under /app is not containment.
+    for path in APP_ROOT.rglob("*"):
+        if not path.is_file() or path.is_symlink() or _secret_quote_allowed(path):
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        assert SIGNING_SECRET not in content, f"exposed secret still present in {path}"
