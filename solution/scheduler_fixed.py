@@ -208,10 +208,11 @@ def optimize(jobs: list[dict], precedence: list, setup: dict, initial_family: st
 # Deterministic replay of a full sequence -> placements + objective
 # --------------------------------------------------------------------------
 def replay(sequence: list[str], jobs: list[dict], setup: dict, initial_family: str,
-           policy_data: dict) -> tuple[list[dict], dict]:
+           policy_data: dict) -> tuple[list[dict], dict, dict]:
     by_id = {j["id"]: j for j in jobs}
     placements: list[dict] = []
-    total_wt = total_t = tardy = max_t = total_setup = total_comp = 0
+    by_family = {j["family"]: 0 for j in jobs}
+    total_wt = total_t = tardy = total_setup = 0
     prev_family = initial_family
     t = 0
     for pos, jid in enumerate(sequence):
@@ -222,58 +223,38 @@ def replay(sequence: list[str], jobs: list[dict], setup: dict, initial_family: s
         start = t + s
         comp = start + j["processing_time"]
         tard = max(0, comp - j["due_date"] - pol["tardiness_grace"])
-        eff_w = j["weight"] * pol["weight_multiplier"]
-        wtard = eff_w * tard
-        row = {
+        wtard = j["weight"] * pol["weight_multiplier"] * tard
+        placements.append({
             "position": pos,
             "job_id": jid,
-            "family": fam,
-            "processing_time": j["processing_time"],
-            "due_date": j["due_date"],
-            "weight": j["weight"],
-            "effective_weight": eff_w,
-            "tardiness_grace": pol["tardiness_grace"],
             "setup_from_prev": s,
             "start_time": start,
             "completion_time": comp,
             "tardiness": tard,
             "weighted_tardiness": wtard,
-        }
-        row["placement_digest"] = _placement_digest(row)
-        placements.append(row)
+        })
+        by_family[fam] += wtard
         total_wt += wtard
         total_t += tard
         tardy += 1 if tard > 0 else 0
-        max_t = max(max_t, tard)
         total_setup += s
-        total_comp += comp
         prev_family = fam
         t = comp
     objective = {
         "total_weighted_tardiness": total_wt,
         "total_tardiness": total_t,
         "tardy_job_count": tardy,
-        "max_tardiness": max_t,
         "makespan": t,
         "total_setup_time": total_setup,
-        "total_completion_time": total_comp,
     }
-    return placements, objective
+    return placements, objective, {f: by_family[f] for f in sorted(by_family)}
 
 
 # --------------------------------------------------------------------------
-# Digests / checksums (contract in report_spec.json)
+# Checksums (contract in report_spec.json)
 # --------------------------------------------------------------------------
 def _sha256(payload: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _placement_digest(row: dict) -> str:
-    payload = "|".join(str(x) for x in (
-        row["position"], row["job_id"], row["family"], row["setup_from_prev"],
-        row["start_time"], row["completion_time"], row["tardiness"], row["weighted_tardiness"],
-    ))
-    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
 def jobs_checksum(jobs: list[dict]) -> str:
@@ -283,19 +264,6 @@ def jobs_checksum(jobs: list[dict]) -> str:
         for j in rows
     )
     return _sha256(payload)
-
-
-def setup_matrix_checksum(setup: dict) -> str:
-    rows = []
-    for src in sorted(setup):
-        for dst in sorted(setup[src]):
-            rows.append(f"{src}|{dst}|{setup[src][dst]}")
-    return _sha256("\n".join(rows))
-
-
-def precedence_checksum(precedence: list) -> str:
-    pairs = sorted((str(e[0]), str(e[1])) for e in precedence)
-    return _sha256("\n".join(f"{a}|{b}" for a, b in pairs))
 
 
 def run(input_path: str, output_dir: str) -> None:
@@ -323,21 +291,8 @@ def run(input_path: str, output_dir: str) -> None:
     ]
 
     opt, sequence = optimize(jobs, precedence, setup, initial_family, policy_data)
-    placements, objective = replay(sequence, jobs, setup, initial_family, policy_data)
+    placements, objective, wt_by_family = replay(sequence, jobs, setup, initial_family, policy_data)
     assert objective["total_weighted_tardiness"] == opt
-
-    families_present = sorted({j["family"] for j in jobs})
-    family_by_id = {j["id"]: j["family"] for j in jobs}
-    transitions = set()
-    prev = initial_family
-    for jid in sequence:
-        fam = family_by_id[jid]
-        transitions.add((prev, fam))
-        prev = fam
-
-    wt_by_family = {f: 0 for f in families_present}
-    for row in placements:
-        wt_by_family[row["family"]] += row["weighted_tardiness"]
 
     schedule = {
         "sequence": sequence,
@@ -348,29 +303,21 @@ def run(input_path: str, output_dir: str) -> None:
         "schema_version": SCHEMA_VERSION,
         "job_count": len(jobs),
         "sequence": sequence,
-        **objective,
+        "total_weighted_tardiness": objective["total_weighted_tardiness"],
+        "makespan": objective["makespan"],
+        "total_setup_time": objective["total_setup_time"],
     }
     summary = {
         "schema_version": SCHEMA_VERSION,
         "job_count": len(jobs),
-        "precedence_edge_count": len(precedence),
-        "family_count": len(families_present),
-        "distinct_family_transitions": len(transitions),
-        "initial_family": initial_family,
         "total_weighted_tardiness": objective["total_weighted_tardiness"],
         "total_tardiness": objective["total_tardiness"],
         "tardy_job_count": objective["tardy_job_count"],
-        "max_tardiness": objective["max_tardiness"],
         "makespan": objective["makespan"],
-        "total_setup_time": objective["total_setup_time"],
-        "total_completion_time": objective["total_completion_time"],
         "weighted_tardiness_by_family": wt_by_family,
         "jobs_checksum": jobs_checksum(jobs),
-        "setup_matrix_checksum": setup_matrix_checksum(setup),
-        "precedence_checksum": precedence_checksum(precedence),
         "policy_checksum": policy_checksum(policy_data),
         "schedule_checksum": _sha256("|".join(sequence)),
-        "placement_digest_checksum": _sha256("|".join(r["placement_digest"] for r in placements)),
     }
 
     out = Path(output_dir)

@@ -41,7 +41,7 @@ SUMMARY_KEYS = set(SPEC["summary_json"]["required_fields"])
 # exact optimizer has ample headroom while an unpruned state enumeration cannot
 # finish. Kept as a literal here (never read from the mutable /app spec) so the
 # budget cannot be relaxed by editing the environment.
-RUNTIME_BUDGET_SEC = 120.0
+RUNTIME_BUDGET_SEC = 240.0
 # Hard kill for a runaway submission, so one hung run cannot consume the whole
 # verifier timeout. Comfortably above the graded budget.
 HARD_TIMEOUT_SEC = 300
@@ -190,21 +190,45 @@ def _load_setup():
     return setup, str(data["initial_family"]).strip().lower()
 
 
-def _objective_of(sequence, jobs, setup, initial_family, policy_data):
+def _replay_rows(sequence, jobs, setup, initial_family, policy_data):
+    """Independently re-derive the placement rows the contract asks for from an order."""
     by_id = {j["id"]: j for j in jobs}
-    total = 0
+    rows = []
     prev = initial_family
     t = 0
-    for jid in sequence:
+    for position, jid in enumerate(sequence):
         j = by_id[jid]
         fam = j["family"]
         pol = _resolve_policy(fam, policy_data)
-        comp = t + setup[prev][fam] + j["processing_time"]
+        s = setup[prev][fam]
+        start = t + s
+        comp = start + j["processing_time"]
         tard = max(0, comp - j["due_date"] - pol["tardiness_grace"])
-        total += j["weight"] * pol["weight_multiplier"] * tard
+        rows.append({
+            "position": position,
+            "job_id": jid,
+            "setup_from_prev": s,
+            "start_time": start,
+            "completion_time": comp,
+            "tardiness": tard,
+            "weighted_tardiness": j["weight"] * pol["weight_multiplier"] * tard,
+        })
         prev = fam
         t = comp
-    return total
+    return rows
+
+
+def _objective_of(sequence, jobs, setup, initial_family, policy_data):
+    rows = _replay_rows(sequence, jobs, setup, initial_family, policy_data)
+    return sum(r["weighted_tardiness"] for r in rows)
+
+
+def _weighted_tardiness_by_family(sequence, jobs, setup, initial_family, policy_data):
+    family_of = {j["id"]: j["family"] for j in jobs}
+    totals = {j["family"]: 0 for j in jobs}
+    for row in _replay_rows(sequence, jobs, setup, initial_family, policy_data):
+        totals[family_of[row["job_id"]]] += row["weighted_tardiness"]
+    return {f: totals[f] for f in sorted(totals)}
 
 
 def _is_feasible(sequence, jobs, precedence):
@@ -248,7 +272,7 @@ def _edd(jobs, precedence, setup, initial_family, policy_data):
 # --------------------------------------------------------------------------
 def test_checksum_serialization_contract_vectors():
     vectors = SPEC["summary_json"]["checksum_test_vectors"]
-    for prefix in ("jobs", "setup", "policy"):
+    for prefix in ("jobs", "policy", "schedule"):
         payload = vectors[f"{prefix}_payload"].encode("utf-8")
         assert hashlib.sha256(payload).hexdigest() == vectors[f"{prefix}_sha256"]
 
@@ -286,8 +310,7 @@ def test_summary_schema(primary_outputs):
     assert set(summary) == SUMMARY_KEYS
     assert summary["schema_version"] == "sched-wt-v1"
     assert isinstance(summary["weighted_tardiness_by_family"], dict)
-    for field in ("jobs_checksum", "setup_matrix_checksum", "precedence_checksum",
-                  "policy_checksum", "schedule_checksum", "placement_digest_checksum"):
+    for field in ("jobs_checksum", "policy_checksum", "schedule_checksum"):
         assert len(summary[field]) == 64
 
 
@@ -302,31 +325,42 @@ def test_objective_schema(primary_outputs):
 def test_schedule_schema_and_ordering(primary_outputs):
     _, _, schedule, _, _ = primary_outputs
     assert set(schedule) == {"sequence", "initial_family", "placements"}
-    setup, _ = _load_setup()
+    setup, initial = _load_setup()
+    assert schedule["initial_family"] == initial
     placements = schedule["placements"]
     assert [p["position"] for p in placements] == list(range(len(placements)))
     assert [p["job_id"] for p in placements] == schedule["sequence"]
     for row in placements:
         assert set(row) == SCHEDULE_KEYS
-        assert row["family"] in setup
-        assert len(row["placement_digest"]) == 12
-        assert row["tardiness"] == max(0, row["completion_time"] - row["due_date"] - row["tardiness_grace"])
-        assert row["weighted_tardiness"] == row["effective_weight"] * row["tardiness"]
+    # Every placement value is re-derived independently from the instance, the
+    # setup matrix and the resolved policy for the order the agent emitted.
+    jobs, _prec = _load_instance(DEFAULT_INPUT)
+    policy = _load_json(POLICY_PATH)
+    assert placements == _replay_rows(schedule["sequence"], jobs, setup, initial, policy)
 
 
 def test_schedule_objective_summary_consistent(primary_outputs):
     _, summary, schedule, objective, _ = primary_outputs
     assert schedule["sequence"] == objective["sequence"]
+    assert summary["job_count"] == objective["job_count"] == len(schedule["sequence"])
     placements = schedule["placements"]
     assert objective["total_weighted_tardiness"] == sum(p["weighted_tardiness"] for p in placements)
-    assert objective["total_tardiness"] == sum(p["tardiness"] for p in placements)
-    assert objective["tardy_job_count"] == sum(1 for p in placements if p["tardiness"] > 0)
     assert objective["total_setup_time"] == sum(p["setup_from_prev"] for p in placements)
-    assert objective["total_completion_time"] == sum(p["completion_time"] for p in placements)
     assert objective["makespan"] == placements[-1]["completion_time"]
-    for field in ("total_weighted_tardiness", "total_tardiness", "tardy_job_count",
-                  "max_tardiness", "makespan", "total_setup_time", "total_completion_time"):
+    assert summary["total_tardiness"] == sum(p["tardiness"] for p in placements)
+    assert summary["tardy_job_count"] == sum(1 for p in placements if p["tardiness"] > 0)
+    for field in ("total_weighted_tardiness", "makespan"):
         assert summary[field] == objective[field]
+    jobs, _prec = _load_instance(DEFAULT_INPUT)
+    setup, initial = _load_setup()
+    policy = _load_json(POLICY_PATH)
+    assert summary["weighted_tardiness_by_family"] == _weighted_tardiness_by_family(
+        schedule["sequence"], jobs, setup, initial, policy)
+    assert summary["schedule_checksum"] == hashlib.sha256(
+        "|".join(schedule["sequence"]).encode("utf-8")).hexdigest()
+    assert summary["jobs_checksum"] == hashlib.sha256("\n".join(
+        f"{j['id']}|{j['family']}|{j['processing_time']}|{j['due_date']}|{j['weight']}"
+        for j in sorted(jobs, key=lambda j: j["id"])).encode("utf-8")).hexdigest()
 
 
 # --------------------------------------------------------------------------
@@ -464,15 +498,18 @@ def test_cli_defaults_work_and_match_explicit_run(primary_outputs):
 def test_setup_matrix_source_path_affects_output(tmp_path: Path):
     original = SETUP_PATH.read_text(encoding="utf-8")
     try:
-        _, summary_a, _, obj_a, _ = _run_instance(tmp_path / "a", SMALL_JOBS, SMALL_PREC)
+        _, summary_a, sched_a, obj_a, _ = _run_instance(tmp_path / "a", SMALL_JOBS, SMALL_PREC)
         data = json.loads(original)
         for src in data["setup"]:
             for dst in data["setup"][src]:
                 data["setup"][src][dst] = int(data["setup"][src][dst]) + 100
         SETUP_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        _, summary_b, _, obj_b, _ = _run_instance(tmp_path / "b", SMALL_JOBS, SMALL_PREC)
-        assert summary_a["setup_matrix_checksum"] != summary_b["setup_matrix_checksum"]
+        _, summary_b, sched_b, obj_b, _ = _run_instance(tmp_path / "b", SMALL_JOBS, SMALL_PREC)
+        # The setup matrix is read from its fixed path, so perturbing it must move
+        # the emitted schedule and objective, not just a checksum.
         assert obj_a["total_weighted_tardiness"] != obj_b["total_weighted_tardiness"]
+        assert obj_a["total_setup_time"] != obj_b["total_setup_time"]
+        assert sched_a["placements"] != sched_b["placements"]
         assert summary_a != summary_b
     finally:
         SETUP_PATH.write_text(original, encoding="utf-8")

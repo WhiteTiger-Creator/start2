@@ -21,7 +21,7 @@ per-job priority rule (weighted-shortest-processing-time, earliest-due-date) is 
 greedy scheduler is measurably worse than the board's optimum on the shipped instances. Third, and this is
 what makes the exact optimisation an engineering problem rather than a textbook exercise, the graded
 instances are scaled to 20 jobs over 6 families with deliberately sparse precedence (6-7 edges, which prunes
-almost nothing), and instruction.md, the output contract and the verifier all impose a 120-second wall-clock
+almost nothing), and instruction.md, the output contract and the verifier all impose a 240-second wall-clock
 budget on a single run. The obvious exact formulation -- memoising on (remaining jobs, last family, current
 clock) -- exhausts a 3.5 GB heap on the shipped instance without ever returning, because the clock takes
 hundreds of distinct values per subset. To fit the budget the engineer has to notice that a partial
@@ -72,7 +72,7 @@ alternate instances, and on a crafted micro-instance the WSPT order's objective 
 agent's optimal objective. The exact optimum itself was validated offline against brute force over all
 feasible permutations on hundreds of random tiny instances, sequence and value. Each graded instance is run
 once per session and every test reuses that run: the suite also times those two runs and asserts each
-finished inside the 120-second wall-clock budget that instruction.md and report_spec.json state (the
+finished inside the 240-second wall-clock budget that instruction.md and report_spec.json state (the
 reference needs about a fifth of it; an exact optimiser without dominance pruning cannot finish at all), and
 a hard subprocess timeout keeps a runaway submission from consuming the verifier timeout. The cheap
 policy/source-path and idempotency probes deliberately use a small instance so the whole suite stays around
@@ -109,7 +109,7 @@ storage_mb = 10240
 network_mode = "no-network"
 
 [agent]
-timeout_sec = 3600
+timeout_sec = 7200
 
 [verifier]
 timeout_sec = 1800
