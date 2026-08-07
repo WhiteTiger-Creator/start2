@@ -11,13 +11,10 @@ RUN pip install --no-cache-dir \
 RUN mkdir -p /app
 
 # Verifier-execution isolation: the submitted program is run under the unprivileged uid 65534
-# (nobody). setpriv (util-linux) drops privileges; a world-writable scratch area lets the candidate
-# write only there. /tests (held-out fixtures) and the reward path stay root-owned and unreadable
-# /unwritable to the candidate.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends util-linux \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /candidate-work \
+# (nobody). setpriv ships in the base image, so no package install is needed here; a world-writable
+# scratch area lets the candidate write only there. /tests (held-out fixtures) and the reward path
+# stay root-owned and unreadable/unwritable to the candidate.
+RUN mkdir -p /candidate-work \
     && chmod 1777 /candidate-work
 
 WORKDIR /tests
