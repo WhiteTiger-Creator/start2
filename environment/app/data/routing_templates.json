@@ -1,0 +1,111 @@
+{
+  "cell-grind": {
+    "family": "grind"
+  },
+  "cell-mill": {
+    "family": "mill"
+  },
+  "cell-plate": {
+    "family": "plate"
+  },
+  "cell-press": {
+    "family": "press"
+  },
+  "cell-weld": {
+    "family": "weld"
+  },
+  "grind-heavy": {
+    "extends": "cell-grind",
+    "processing_time": 13,
+    "due_date": 60,
+    "weight": 5
+  },
+  "grind-light": {
+    "extends": "cell-grind",
+    "processing_time": 9,
+    "due_date": 57,
+    "weight": 3
+  },
+  "mill-quick": {
+    "extends": "cell-mill",
+    "processing_time": 5,
+    "due_date": 63,
+    "weight": 5
+  },
+  "weld-long": {
+    "extends": "cell-weld",
+    "processing_time": 13,
+    "due_date": 47,
+    "weight": 5
+  },
+  "press-std": {
+    "extends": "cell-press",
+    "processing_time": 9,
+    "due_date": 48,
+    "weight": 5
+  },
+  "press-bulk": {
+    "extends": "cell-press",
+    "processing_time": 12,
+    "due_date": 84,
+    "weight": 5
+  },
+  "plate-std": {
+    "extends": "cell-plate",
+    "processing_time": 6,
+    "due_date": 72,
+    "weight": 5
+  },
+  "grind-finish": {
+    "extends": "grind-light",
+    "due_date": 79,
+    "weight": 4
+  },
+  "press-flash": {
+    "extends": "press-std",
+    "processing_time": 3,
+    "due_date": 66
+  },
+  "press-relief": {
+    "extends": "press-std",
+    "processing_time": 6
+  },
+  "press-trim": {
+    "extends": "press-std",
+    "processing_time": 5,
+    "due_date": 63,
+    "weight": 4
+  },
+  "press-guard": {
+    "extends": "press-bulk",
+    "processing_time": 9,
+    "due_date": 82,
+    "weight": 4
+  },
+  "plate-frame": {
+    "extends": "plate-std",
+    "processing_time": 12,
+    "due_date": 61,
+    "weight": 4
+  },
+  "plate-shim": {
+    "extends": "plate-std",
+    "processing_time": 5,
+    "due_date": 86,
+    "weight": 2
+  },
+  "weld-tack": {
+    "extends": "weld-long",
+    "processing_time": 4,
+    "due_date": 67,
+    "weight": 2
+  },
+  "press-carrier": {
+    "extends": "press-bulk"
+  },
+  "press-carrier-a": {
+    "extends": "press-carrier",
+    "due_date": 89,
+    "weight": 4
+  }
+}

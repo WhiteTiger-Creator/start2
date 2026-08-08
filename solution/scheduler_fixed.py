@@ -31,7 +31,6 @@ deterministic.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
@@ -82,13 +81,6 @@ def resolve_policy(family: str, policy_data: dict) -> dict:
             if field in resolved:
                 resolved[field] = coerce_int(val)
     return resolved
-
-
-def policy_checksum(policy_data: dict) -> str:
-    lines = ["default|" + "|".join(str(resolve_policy("__default__", policy_data)[f]) for f in POLICY_FIELDS)]
-    for family in sorted(policy_data.get("family_overrides", {})):
-        lines.append(family + "|" + "|".join(str(resolve_policy(family, policy_data)[f]) for f in POLICY_FIELDS))
-    return _sha256("\n".join(lines))
 
 
 # --------------------------------------------------------------------------
@@ -250,22 +242,6 @@ def replay(sequence: list[str], jobs: list[dict], setup: dict, initial_family: s
     return placements, objective, {f: by_family[f] for f in sorted(by_family)}
 
 
-# --------------------------------------------------------------------------
-# Checksums (contract in report_spec.json)
-# --------------------------------------------------------------------------
-def _sha256(payload: str) -> str:
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def jobs_checksum(jobs: list[dict]) -> str:
-    rows = sorted(jobs, key=lambda j: j["id"])
-    payload = "\n".join(
-        f"{j['id']}|{j['family']}|{j['processing_time']}|{j['due_date']}|{j['weight']}"
-        for j in rows
-    )
-    return _sha256(payload)
-
-
 def run(input_path: str, output_dir: str) -> None:
     payload = json.loads(Path(input_path).read_text(encoding="utf-8"))
     raw_jobs = payload["jobs"]
@@ -315,9 +291,6 @@ def run(input_path: str, output_dir: str) -> None:
         "tardy_job_count": objective["tardy_job_count"],
         "makespan": objective["makespan"],
         "weighted_tardiness_by_family": wt_by_family,
-        "jobs_checksum": jobs_checksum(jobs),
-        "policy_checksum": policy_checksum(policy_data),
-        "schedule_checksum": _sha256("|".join(sequence)),
     }
 
     out = Path(output_dir)

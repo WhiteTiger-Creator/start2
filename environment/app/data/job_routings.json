@@ -1,0 +1,131 @@
+{
+  "jobs": [
+    {
+      "id": "j04",
+      "routing": "press-std"
+    },
+    {
+      "id": "j17",
+      "routing": "plate-frame"
+    },
+    {
+      "id": "j00",
+      "routing": "grind-heavy"
+    },
+    {
+      "id": "j08",
+      "routing": "grind-heavy",
+      "processing_time": 11,
+      "due_date": 64,
+      "weight": 2
+    },
+    {
+      "id": "j12",
+      "routing": "press-trim"
+    },
+    {
+      "id": "j05",
+      "routing": "press-flash"
+    },
+    {
+      "id": "j19",
+      "routing": "mill-quick",
+      "processing_time": 6,
+      "weight": 1
+    },
+    {
+      "id": "j02",
+      "routing": "weld-long"
+    },
+    {
+      "id": "j10",
+      "routing": "press-carrier-a"
+    },
+    {
+      "id": "j15",
+      "routing": "press-std",
+      "processing_time": 4,
+      "due_date": 44,
+      "weight": 3
+    },
+    {
+      "id": "j09",
+      "routing": "forge-retired-cell",
+      "family": "forge",
+      "processing_time": 3,
+      "due_date": 50
+    },
+    {
+      "id": "j03",
+      "routing": "grind-light"
+    },
+    {
+      "id": "j13",
+      "routing": "press-guard"
+    },
+    {
+      "id": "j07",
+      "routing": "grind-finish"
+    },
+    {
+      "id": "j16",
+      "routing": "plate-std"
+    },
+    {
+      "id": "j11",
+      "routing": "press-relief"
+    },
+    {
+      "id": "j01",
+      "routing": "mill-quick"
+    },
+    {
+      "id": "j12",
+      "routing": "press-bulk",
+      "due_date": 39,
+      "weight": 1
+    },
+    {
+      "id": "j18",
+      "routing": "plate-shim"
+    },
+    {
+      "id": "j06",
+      "routing": "press-bulk"
+    },
+    {
+      "id": "j14",
+      "routing": "weld-tack"
+    }
+  ],
+  "precedence": [
+    [
+      "j02",
+      "j17"
+    ],
+    [
+      "j04",
+      "j16"
+    ],
+    [
+      "j05",
+      "j13"
+    ],
+    [
+      "j08",
+      "j17"
+    ],
+    [
+      "j04",
+      "j16"
+    ],
+    [
+      "j12",
+      "j17"
+    ],
+    [
+      "j15",
+      "j19"
+    ]
+  ]
+}

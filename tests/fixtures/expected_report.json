@@ -1,4 +1,179 @@
 {
+  "shipped_stale_sha256": "3e722025fb5f36401f14e05f476da5060848bbff5474e23426aaa819e7e93b5d",
+  "routings_sha256": "3499b6980c8acd7f2947876c0948f2e7fae3bba6e61e22ec5a8e6d6bc920d32e",
+  "templates_sha256": "7712898c21856ba8b5afd2fce98073cade5f57364ab6cbb93e4c6bbff6b446cc",
+  "calendar_sha256": "663f936d5bd12b13b89bc056fd9262d42dc8113814785384a3c666851b21427e",
+  "broken_pipeline_sha256": "2c47e0a38b63dff511c5f09cdfb37d27e54283f94e21ff0edfa89c6d6fd32b26",
+  "expanded_instance": {
+    "jobs": [
+      {
+        "id": "j00",
+        "family": "grind",
+        "processing_time": 13,
+        "due_date": 60,
+        "weight": 5
+      },
+      {
+        "id": "j01",
+        "family": "mill",
+        "processing_time": 5,
+        "due_date": 63,
+        "weight": 5
+      },
+      {
+        "id": "j02",
+        "family": "weld",
+        "processing_time": 13,
+        "due_date": 47,
+        "weight": 5
+      },
+      {
+        "id": "j03",
+        "family": "grind",
+        "processing_time": 9,
+        "due_date": 57,
+        "weight": 3
+      },
+      {
+        "id": "j04",
+        "family": "press",
+        "processing_time": 9,
+        "due_date": 48,
+        "weight": 5
+      },
+      {
+        "id": "j05",
+        "family": "press",
+        "processing_time": 3,
+        "due_date": 66,
+        "weight": 5
+      },
+      {
+        "id": "j06",
+        "family": "press",
+        "processing_time": 12,
+        "due_date": 84,
+        "weight": 5
+      },
+      {
+        "id": "j07",
+        "family": "grind",
+        "processing_time": 9,
+        "due_date": 79,
+        "weight": 4
+      },
+      {
+        "id": "j08",
+        "family": "grind",
+        "processing_time": 11,
+        "due_date": 64,
+        "weight": 2
+      },
+      {
+        "id": "j09",
+        "family": "forge",
+        "processing_time": 3,
+        "due_date": 50,
+        "weight": 2
+      },
+      {
+        "id": "j10",
+        "family": "press",
+        "processing_time": 12,
+        "due_date": 89,
+        "weight": 4
+      },
+      {
+        "id": "j11",
+        "family": "press",
+        "processing_time": 6,
+        "due_date": 48,
+        "weight": 5
+      },
+      {
+        "id": "j12",
+        "family": "press",
+        "processing_time": 5,
+        "due_date": 63,
+        "weight": 4
+      },
+      {
+        "id": "j13",
+        "family": "press",
+        "processing_time": 9,
+        "due_date": 82,
+        "weight": 4
+      },
+      {
+        "id": "j14",
+        "family": "weld",
+        "processing_time": 4,
+        "due_date": 67,
+        "weight": 2
+      },
+      {
+        "id": "j15",
+        "family": "press",
+        "processing_time": 4,
+        "due_date": 44,
+        "weight": 3
+      },
+      {
+        "id": "j16",
+        "family": "plate",
+        "processing_time": 6,
+        "due_date": 72,
+        "weight": 5
+      },
+      {
+        "id": "j17",
+        "family": "plate",
+        "processing_time": 12,
+        "due_date": 61,
+        "weight": 4
+      },
+      {
+        "id": "j18",
+        "family": "plate",
+        "processing_time": 5,
+        "due_date": 86,
+        "weight": 2
+      },
+      {
+        "id": "j19",
+        "family": "mill",
+        "processing_time": 6,
+        "due_date": 63,
+        "weight": 1
+      }
+    ],
+    "precedence": [
+      [
+        "j02",
+        "j17"
+      ],
+      [
+        "j04",
+        "j16"
+      ],
+      [
+        "j05",
+        "j13"
+      ],
+      [
+        "j08",
+        "j17"
+      ],
+      [
+        "j12",
+        "j17"
+      ],
+      [
+        "j15",
+        "j19"
+      ]
+    ]
+  },
   "primary": {
     "schedule": {
       "sequence": [
@@ -250,10 +425,7 @@
         "plate": 1000,
         "press": 782,
         "weld": 854
-      },
-      "jobs_checksum": "315cd43687142bb0e7c492e6bbc5ad6888a78e1ba8a042925667352b1a6f00fb",
-      "policy_checksum": "633653b1f69732f8888da470575699f096013b10b16cf334e21e665a553b6521",
-      "schedule_checksum": "ba8d4e1e195b6508fb7a2a0b73ffb9f1d1c358cd9c380dad050a46db8430c2f5"
+      }
     }
   },
   "alternate": {
@@ -507,40 +679,11 @@
         "plate": 1222,
         "press": 114,
         "weld": 539
-      },
-      "jobs_checksum": "eb3d95b1bc2060cd5e3d61d6d60524075741fe2f1416a1da34b9fb00025f94d0",
-      "policy_checksum": "633653b1f69732f8888da470575699f096013b10b16cf334e21e665a553b6521",
-      "schedule_checksum": "f4991adf95582883ffdae15dacfb4088c615b83ed94b3edfdc91c67e3710c3a6"
+      }
     }
   },
-  "broken_pipeline_sha256": "155e1c812756aed34c8e4120e271511993034a28fc284b503d8c5bd1eeab0e9d",
-  "broken_summary_sha256": "6e7bdd3f0e1715e21a1852e0122a1e12c5bb0325a3c11d6f9a9e147bd22f9bc3",
-  "broken_objective": 6736,
-  "broken_sequence": [
-    "j05",
-    "j01",
-    "j11",
-    "j12",
-    "j15",
-    "j09",
-    "j04",
-    "j16",
-    "j14",
-    "j07",
-    "j13",
-    "j06",
-    "j18",
-    "j00",
-    "j02",
-    "j03",
-    "j10",
-    "j08",
-    "j17",
-    "j19"
-  ],
   "primary_optimum": 3618,
   "alternate_optimum": 3879,
   "micro_optimum": 210,
-  "micro_wspt": 297,
-  "containment_checklist_sha256": "6c2be4abcc6490c0418f67e3bca5a140f30bff4566c5d72bf971f2464997c35c"
+  "micro_wspt": 297
 }

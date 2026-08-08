@@ -3,20 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# --- Step 1: contain the host to match /app/data/containment_checklist.json ---
+# --- Step 1: expand the released routings into the graded instance (#SCH-5160) ---
+# The rollout left /app/data/jobs.json holding a stale partial instance. Expand the
+# releases against the routing template library and the shop calendar and write the
+# result back to that path; nothing the scheduler emits is correct until this is done.
 
-# Revoke the rollout automation's SSH persistence, preserving any other keys.
-if [ -f /app/host/authorized_keys ]; then
-  grep -v 'batch-rollout-automation' /app/host/authorized_keys > /app/host/authorized_keys.tmp || true
-  mv /app/host/authorized_keys.tmp /app/host/authorized_keys
-fi
-
-# Remove the passwordless sudoers escalation entirely.
-rm -f /app/host/sudoers.d/batch-rollout
-
-# Remove the exposed world-readable plaintext scheduler signing secret so the
-# secret string no longer appears anywhere under /app.
-rm -f /app/host/exposed/scheduler_signing.key
+python3 "${SCRIPT_DIR}/expand_routing.py"
 
 # --- Step 2: restore the scheduler and produce the schedule artifacts ---
 
